@@ -517,6 +517,11 @@ def dmft_cycle(general_params, solver_params, advanced_params, dft_params,
     is_converged = False
     for it in range(iteration_offset + 1, iteration_offset + n_iter + 1):
 
+        # check for last iteration of a dmft cycle
+        is_last_iter = False
+        if it == iteration_offset + n_iter:
+            is_last_iter = True
+        mpi.report("is_last_iter set to", is_last_iter)
         # remove h_field when number of iterations is reached
         if sum_k.h_field != 0.0 and general_params['h_field_it'] != 0 and it > general_params['h_field_it']:
             mpi.report('\nRemoving magnetic field now.\n')
@@ -531,7 +536,7 @@ def dmft_cycle(general_params, solver_params, advanced_params, dft_params,
                                                  solver_params, advanced_params, dft_params,
                                                  h_int, archive, shell_multiplicity, E_kin_dft,
                                                  observables, conv_obs, Op_list, dft_irred_kpt_indices, dft_energy,
-                                                 is_converged, is_sampling=False)
+                                                 is_converged, is_sampling=False, is_last_iter = is_last_iter)
 
         if is_converged:
             break
@@ -578,7 +583,7 @@ def _dmft_step(sum_k, solvers, it, general_params,
                solver_params, advanced_params, dft_params,
                h_int, archive, shell_multiplicity, E_kin_dft,
                observables, conv_obs, Op_list, dft_irred_kpt_indices, dft_energy,
-               is_converged, is_sampling):
+               is_converged, is_sampling, is_last_iter):
     """
     Contains the actual dmft steps when all the preparation is done
     """
@@ -706,7 +711,7 @@ def _dmft_step(sum_k, solvers, it, general_params,
 
     # saving previous mu for writing to observables file
     previous_mu = sum_k.chemical_potential
-    sum_k = manipulate_mu.update_mu(general_params, sum_k, it, archive)
+    sum_k = manipulate_mu.update_mu(general_params, sum_k, it, archive, is_last_iter)
 
     # if we do a CSC calculation we need always an updated GAMMA file
     E_bandcorr = 0.0
