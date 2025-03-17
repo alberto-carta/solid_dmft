@@ -352,7 +352,7 @@ def set_initial_mu(general_params, sum_k, iteration_offset, archive, broadening)
 
     return sum_k
 
-def update_mu(general_params, sum_k, it, archive, broadening):
+def update_mu(general_params, sum_k, it, archive, broadening, is_last_iter = False):
     """
     Handles the different ways of updating the chemical potential mu:
     * Chemical potential set to fixed value: uses this value
@@ -384,6 +384,14 @@ def update_mu(general_params, sum_k, it, archive, broadening):
     if general_params['fixed_mu_value'] is not None:
         sum_k.set_mu(general_params['fixed_mu_value'])
         mpi.report('+++ Keeping the chemical potential fixed at {:.3f} eV +++'.format(general_params['fixed_mu_value']))
+        return sum_k
+    # Overrides every other case and computes the mu as normal if you are at the final step of a dmft cycle
+    # this is to allow the use of the maxent gap finder in a CSC calculation, invokes gap finder for intermediate dmft steps
+    # but the last step finds the mu as usual
+    if is_last_iter:
+        previous_mu = sum_k.chemical_potential
+        sum_k.calc_mu(precision=general_params['prec_mu'], method=general_params['calc_mu_method'],
+                      broadening=broadening)
         return sum_k
 
     # If mu won't be updated this step, don't update it...
