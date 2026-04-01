@@ -96,7 +96,7 @@ def _verify_input_params_solver(params: FullConfig) -> None:
 
     # Checks that all solvers support the specified grid
     # TODO: add real-frequency support for solvers that do both (e.g., hartree)
-    supported_grids = {'real': ['ftps'], 'imag': ['cthyb', 'ctint', 'ctseg', 'hubbardI', 'hartree']}
+    supported_grids = {'real': ['ftps'], 'imag': ['cthyb', 'ctint', 'ctseg', 'hubbardI', 'hartree', 'tde']}
     if params['general']['beta'] is not None:
         for entry in solver_params:
             if entry['type'] not in supported_grids['imag']:
@@ -131,6 +131,15 @@ def _verify_input_params_solver(params: FullConfig) -> None:
                        entry['perform_tail_fit']]
             if sum(tail_op) > 1:
                 raise ValueError('Only one of the options "crm_dyson_solver", "legendre_fit", "measure_G_l", or "perform_tail_fit" can be set to True.')
+        if entry['type'] == 'tde':
+            if entry['proposal_type'] not in ('density_matrix', 'sobol', 'both'):
+                raise ValueError(f'Invalid "proposal_type" = {entry["proposal_type"]} for tde solver. '
+                                 f'Must be one of: density_matrix, sobol, both.')
+            if entry['verbosity'] not in ('quiet', 'normal', 'debug'):
+                raise ValueError(f'Invalid "verbosity" = {entry["verbosity"]} for tde solver. '
+                                 f'Must be one of: quiet, normal, debug.')
+            if entry['n_warmup_hf'] < 0:
+                raise ValueError(f'"n_warmup_hf" must be >= 0, got {entry["n_warmup_hf"]}.')
 
 
 def _verify_input_params_gw(params: FullConfig) -> None:
@@ -156,8 +165,8 @@ def verify_h5_dependent(sum_k, solver_type_per_imp, general_params):
         raise ValueError('AFM order not supported with SO coupling')
 
     # Checks that enforce_off_diag true for ftps and hartree
-    if any(s in ['ftps', 'hartree'] and not e for s, e in zip(solver_type_per_imp, general_params['enforce_off_diag'])):
-        raise ValueError('enforce_off_diag must be True for a impurities solver by ftps or hartree solvers')
+    if any(s in ['ftps', 'hartree', 'tde'] and not e for s, e in zip(solver_type_per_imp, general_params['enforce_off_diag'])):
+        raise ValueError('enforce_off_diag must be True for a impurities solver by ftps, hartree, or tde solvers')
 
     # Checks that the interaction Hamiltonian and the parameters match
     if any(

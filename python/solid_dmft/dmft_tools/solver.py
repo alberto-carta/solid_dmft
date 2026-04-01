@@ -52,6 +52,12 @@ if check_solver:
     from solid_dmft.dmft_tools.solvers.hartree_interface import HartreeInterface
     interfaces_dict['hartree'] = HartreeInterface
 
+check_solver = (importlib.util.find_spec("triqs_tde") is not None
+                and importlib.util.find_spec("triqs_hartree_fock") is not None)
+if check_solver:
+    from solid_dmft.dmft_tools.solvers.tde_interface import TDEInterface
+    interfaces_dict['tde'] = TDEInterface
+
 check_solver = importlib.util.find_spec("triqs_hubbardI") is not None
 if check_solver:
     from solid_dmft.dmft_tools.solvers.hubbardI_interface import HubbardIInterface
