@@ -142,15 +142,18 @@ def _save_landscape(tde_solver, output_dir, it, icrsh):
     df.to_csv(dat_path, sep='\t', index=True)
     mpi.report(f'  TDE landscape data saved to {dat_path}')
 
-    # Try to save plot
+    # Try to save plots (scatter + histogram as separate files)
     try:
         import matplotlib
         matplotlib.use('Agg')
-        png_path = os.path.join(landscape_dir, f'{stem}.png')
-        tde_solver.plot_landscape(save_path=png_path, show=False)
-        mpi.report(f'  TDE landscape plot saved to {png_path}')
+        landscape_path  = os.path.join(landscape_dir, f'{stem}_landscape.png')
+        histogram_path  = os.path.join(landscape_dir, f'{stem}_histogram.png')
+        tde_solver.plot_landscape(save_path=landscape_path, show=False)
+        tde_solver.plot_action_histogram(save_path=histogram_path, show=False)
+        mpi.report(f'  TDE landscape plot saved to {landscape_path}')
+        mpi.report(f'  TDE histogram plot saved to {histogram_path}')
     except ImportError:
-        mpi.report('  matplotlib not available — skipping landscape plot')
+        mpi.report('  matplotlib not available — skipping landscape plots')
 
 
 class TDEInterface(AbstractDMFTSolver):
