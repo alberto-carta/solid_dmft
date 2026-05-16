@@ -138,6 +138,7 @@ def _save_landscape(tde_solver, output_dir, it, icrsh):
 
     # Save data file
     df = tde_solver.solutions.to_dataframe()
+    df['action'] = df['action'] + df.get('regret', 0.0)
     dat_path = os.path.join(landscape_dir, f'{stem}.dat')
     df.to_csv(dat_path, sep='\t', index=True)
     mpi.report(f'  TDE landscape data saved to {dat_path}')
