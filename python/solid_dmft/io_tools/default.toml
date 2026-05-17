@@ -193,7 +193,10 @@ with_fock = true
 # TDE-specific
 n_warmup_hf = 20
 enforce_paramagnetic = true
+enforce_orbital_permutations = false
+orbital_symmetry_threshold = 0.01
 prune_tol = 0.1
+denoising_bin_size = 0.0
 warm_start = true
 proposal_type = "density_matrix"
 n_proposals = 200

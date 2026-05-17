@@ -40,6 +40,7 @@ from triqs.gf import MeshReFreq, Gf
 from triqs.gf.descriptors import Fourier
 import triqs.utility.mpi as mpi
 
+from triqs_dft_tools.util import compute_DC_from_density
 from solid_dmft.dmft_tools.solvers.abstractdmftsolver import AbstractDMFTSolver
 
 from triqs_hartree_fock import ImpuritySolver as hartree_solver
@@ -87,11 +88,17 @@ def _validate_custom_proposals(proposals, gf_struct):
 
 
 def _load_custom_proposals(filepath, gf_struct, icrsh):
-    """Load custom proposals from a Python file.
+    """Load custom proposals (and optional orbital symmetry groups) from a Python file.
 
     The file must define ``get_custom_proposals(gf_struct, icrsh)`` returning
     ``list[dict[str, np.ndarray]]`` — a list of target density matrices for
     the given impurity index ``icrsh``.
+
+    Optionally the file may also define
+    ``get_orbital_symmetry_groups(gf_struct, icrsh)`` returning
+    ``list[list[int]]`` — the degenerate orbital groups used for permutation
+    augmentation (e.g. ``[[0, 3], [1, 2, 4]]`` for FeO eg/t2g).  When absent,
+    no permutation augmentation is performed.
     """
     filepath = os.path.abspath(filepath)
     if not os.path.isfile(filepath):
@@ -109,7 +116,12 @@ def _load_custom_proposals(filepath, gf_struct, icrsh):
 
     proposals = mod.get_custom_proposals(gf_struct, icrsh)
     _validate_custom_proposals(proposals, gf_struct)
-    return proposals
+
+    orbital_groups = None
+    if hasattr(mod, 'get_orbital_symmetry_groups'):
+        orbital_groups = mod.get_orbital_symmetry_groups(gf_struct, icrsh)
+
+    return proposals, orbital_groups
 
 
 def _save_landscape(tde_solver, output_dir, it, icrsh):
@@ -220,7 +232,9 @@ class TDEInterface(AbstractDMFTSolver):
             dc_fixed_value=0.0,  # DC is handled by the HF solver / solid_dmft
             force_real=self.solver_params['force_real'],
             enforce_paramagnetic=self.solver_params['enforce_paramagnetic'],
+            orbital_symmetry_threshold=self.solver_params['orbital_symmetry_threshold'],
             prune_tol=self.solver_params['prune_tol'],
+            denoising_bin_size=self.solver_params['denoising_bin_size'],
             verbosity=self.solver_params['verbosity'],
         )
 
@@ -233,12 +247,23 @@ class TDEInterface(AbstractDMFTSolver):
         # ── Build proposal generators ──
         custom_proposals = None
         if self.solver_params['custom_proposals_file'] is not None:
-            custom_proposals = _load_custom_proposals(
+            custom_proposals, orbital_groups = _load_custom_proposals(
                 self.solver_params['custom_proposals_file'], gf_struct, self.icrsh
             )
             mpi.report(f'  TDE: loaded {len(custom_proposals)} custom proposals '
                        f'for impurity {self.icrsh} from '
                        f'{self.solver_params["custom_proposals_file"]}')
+            if orbital_groups is not None:
+                if self.solver_params['enforce_orbital_permutations']:
+                    self.tde_solver.orbital_symmetry_groups = orbital_groups
+                    mpi.report(f'  TDE: orbital symmetry groups for impurity '
+                               f'{self.icrsh}: {orbital_groups}')
+                else:
+                    mpi.report(
+                        f'  TDE: get_orbital_symmetry_groups found in '
+                        f'custom_proposals_file but enforce_orbital_permutations=False '
+                        f'— Goldstone analysis skipped.'
+                    )
 
         self._proposal_generators = self._build_proposal_generators(custom_proposals)
 
@@ -401,49 +426,72 @@ class TDEInterface(AbstractDMFTSolver):
                 )
 
     def _build_regret_fn(self, n_target: float):
-        """Return a regret callable for the current iteration, or None if disabled.
+        """Return S_regret(N_sol) = N_sol * (V_DC(N_sol) − V_DC(N_ref)).
 
-        The regret term penalises solutions whose electron count deviates from
-        the target established by the converged DMFT bath.  It is constructed
-        from the double-counting self-energy that solid_dmft applied to G0:
+        Derived from the first-order variation of the kinetic embedding action:
 
-            S_regret(N_sol) = dc_scalar × (N_target − N_sol)
+            δE_kin = -Tr[G δG⁻¹]  with  dG⁻¹/dV_DC = 1
+                   = -Tr[G] · δV_DC = -N_sol · δV_DC
 
-        where ``dc_scalar`` is the mean diagonal element of Σ_DC for this shell
-        (i.e. the average on-site DC shift per electron).  The term is:
-          • positive when the solver depletes electrons  (N_sol < N_target)
-          • negative when the solver overshoots           (N_sol > N_target)
+        When the bath G0 carries V_DC(N_ref) but the saddle point has occupation
+        N_sol, the action contains a DC mismatch equal to:
 
-        Added to the embedding action before Boltzmann weighting, this tilts
-        the ensemble away from unphysical charge-depleted saddle points.
+            S_regret = N_sol · (V_DC(N_sol) - V_DC(N_ref))
 
-        Enabled when ``solver_params['regret_dc'] = true``.
+        V_DC is evaluated via triqs_dft_tools.util.compute_DC_from_density using
+        the same DC method as the surrounding solid_dmft calculation.  The slope
+        dV_DC/dN is precomputed once (finite difference, output suppressed).
+
+        Enabled when solver_params['regret_dc'] = true.
         """
         if not self.solver_params.get('regret_dc', False):
             return None
 
-        # Extract Σ_DC for this shell: dc_imp[icrsh] = {block: matrix}
-        dc_shell = self.sum_k.dc_imp[self.icrsh]
-        if not dc_shell:
+
+        dc_U_list = self.advanced_params.get('dc_U')
+        dc_J_list = self.advanced_params.get('dc_J')
+        dc_U = dc_U_list[self.icrsh] if dc_U_list is not None else None
+        dc_J = dc_J_list[self.icrsh] if dc_J_list is not None else 0.0
+
+        if dc_U is None:
+            mpi.report('  TDE regret: dc_U not found in advanced_params — regret disabled.')
             return None
 
-        # Average diagonal element across all blocks and orbitals → scalar shift/electron
-        all_diag = []
-        for mat in dc_shell.values():
-            all_diag.extend(np.real(np.diag(np.array(mat))).tolist())
-        if not all_diag:
-            return None
-        dc_scalar = float(np.mean(all_diag))
+        J = dc_J if dc_J is not None else 0.0
 
-        if mpi.is_master_node():
-            mpi.report(
-                f'  TDE regret: dc_scalar = {dc_scalar:.4f}, '
-                f'N_previous = {n_target:.4f}  →  '
-                f'S_regret(N) = {dc_scalar:.4f} × (N_previous − N)'
-            )
+        # Translate integer dc_type → method string (mirrors _interface_dc logic)
+        dc_type_int = (self.general_params.get('dc_type') or [0])[self.icrsh]
+        magnetic    = self.general_params.get('magnetic', False)
+        dc_method   = {0: 'sFLL' if magnetic else 'cFLL',
+                       1: 'cHeld',
+                       2: 'sAMF' if magnetic else 'cAMF'}.get(dc_type_int, 'cFLL')
+
+        n_orb = self.sum_k.gf_struct_solver_list[self.icrsh][0][1]
+
+        def _v_dc(n):
+            n_spin = n / 2.0 if magnetic else None
+            v, _ = compute_DC_from_density(n, dc_U, J, N_spin=n_spin,
+                                            n_orbitals=n_orb, method=dc_method)
+            return v
+
+        # Evaluate V_DC(N_ref) — one informative printed call is intentional
+        v_dc_ref = _v_dc(n_target)
+
+        # Compute dV_DC/dN via finite difference; suppress the extra DFT-tools output
+        _orig_report = mpi.report
+        mpi.report   = lambda *a, **k: None
+        slope        = (_v_dc(n_target + 0.01) - v_dc_ref) / 0.01
+        mpi.report   = _orig_report
+
+        mpi.report(
+            f'  TDE regret: method={dc_method}, U={dc_U:.4f}, J={J:.4f}, '
+            f'n_orb={n_orb}, N_ref={n_target:.4f}\n'
+            f'    V_DC(N_ref)={v_dc_ref:.4f},  dV_DC/dN={slope:.4f}\n'
+            f'    S_regret(N_sol) = N_sol * dV_DC/dN * (N_sol - N_ref)'
+        )
 
         def regret_fn(n_sol: float) -> float:
-            return dc_scalar * (n_target - n_sol)
+            return - n_sol * slope * (n_sol - n_target)
 
         return regret_fn
 
