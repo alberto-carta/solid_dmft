@@ -755,6 +755,12 @@ def _dmft_step(sum_k, solvers, it, general_params, solver_params, gw_params,
             mpi.report('\nSolving the impurity problem for shell {} ...'.format(icrsh))
             mpi.barrier()
             start_time = timer()
+
+            if "tde" in solver_type_per_imp[icrsh]:
+                # for some situations we want to use the 
+                # sum_k in solver interfaces
+                solvers[icrsh].sum_k = deepcopy(sum_k)
+            #            
             solvers[icrsh].solve(it=it)
             mpi.barrier()
             mpi.report('Actual time for solver: {:.2f} s'.format(timer() - start_time))
