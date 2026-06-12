@@ -52,7 +52,6 @@ from triqs_tde import (
     DensityMatrixProposals,
     SobolSigmaProposals,
 )
-from triqs_tde.pre_solve import load_target
 
 
 def _validate_custom_proposals(proposals, gf_struct):
@@ -194,8 +193,8 @@ class TDEInterface(AbstractDMFTSolver):
 
 
         # for recovery
-        self._mu_precision = general_params.get('mu_precision', 1e-4)
-        self._mu_method = general_params.get('calc_mu_method', 'brent')
+        # self._mu_precision = general_params.get('mu_precision', 1e-4)
+        # self._mu_method = general_params.get('calc_mu_method', 'brent')
 
         # save sum_k for oracle callback
         #self.sum_k = copy.deepcopy(sum_k)
@@ -256,13 +255,13 @@ class TDEInterface(AbstractDMFTSolver):
         self._in_tde_mode = False  # set True when current solve is TDE
         self._prior_solutions = None
 
-        # ── Pre-solve targeting config ──
-        self._pre_solve = self.solver_params.get('pre_solve', False)
-        self._pre_solve_n_iter = self.solver_params.get('pre_solve_n_iter', 1)
-        self._pre_solve_targeting_alpha = self.solver_params.get('pre_solve_targeting_alpha', 1.0)
-        self._pre_solve_target_file = self.solver_params.get('pre_solve_target_file', 'target.py')
-        self._sigma_pre_solve = {bl: np.zeros((sz, sz)) for bl, sz in gf_struct}
-        self._rho_target = None  # loaded on first solve() call
+        # # ── Pre-solve targeting config ──
+        # self._pre_solve = self.solver_params.get('pre_solve', False)
+        # self._pre_solve_n_iter = self.solver_params.get('pre_solve_n_iter', 1)
+        # self._pre_solve_targeting_alpha = self.solver_params.get('pre_solve_targeting_alpha', 1.0)
+        # self._pre_solve_target_file = self.solver_params.get('pre_solve_target_file', 'target.py')
+        # self._sigma_pre_solve = {bl: np.zeros((sz, sz)) for bl, sz in gf_struct}
+        # self._rho_target = None  # loaded on first solve() call
 
         # ── Build proposal generators ──
         custom_proposals = None
@@ -366,73 +365,73 @@ class TDEInterface(AbstractDMFTSolver):
         it = kwargs.get('it', 0)
 
         # ── Load pre-solve target once ──
-        if self._pre_solve and self._rho_target is None:
-            mpi.report('\n  TDE SOLVER: pre-solve mode enabled')
-            mpi.report(f'  loading target from {self._pre_solve_target_file}')
-            rho_raw = load_target(self._pre_solve_target_file)
-            # Map generic block names (up/down) to solver names (up_0/down_0)
-            blocks = [bl for bl, _ in self.triqs_solver.gf_struct]
-            self._rho_target = {}
-            for bl in blocks:
-                short = bl.rsplit('_', 1)[0]
-                if short in rho_raw:
-                    self._rho_target[bl] = np.array(rho_raw[short], dtype=float)
-                elif bl in rho_raw:
-                    self._rho_target[bl] = np.array(rho_raw[bl], dtype=float)
-                else:
-                    raise KeyError(f"target missing block '{bl}' (or '{short}')")
-            for bl, mat in self._rho_target.items():
-                tr = np.trace(mat).real
-                eigs = np.linalg.eigvalsh(mat)
-                mpi.report(f"    target {bl}: trace={tr:.4f}, eigs=[{
-                    ', '.join(f'{v:.3f}' for v in sorted(eigs))}]")
+        # if self._pre_solve and self._rho_target is None:
+        #     mpi.report('\n  TDE SOLVER: pre-solve mode enabled')
+        #     mpi.report(f'  loading target from {self._pre_solve_target_file}')
+        #     rho_raw = load_target(self._pre_solve_target_file)
+        #     # Map generic block names (up/down) to solver names (up_0/down_0)
+        #     blocks = [bl for bl, _ in self.triqs_solver.gf_struct]
+        #     self._rho_target = {}
+        #     for bl in blocks:
+        #         short = bl.rsplit('_', 1)[0]
+        #         if short in rho_raw:
+        #             self._rho_target[bl] = np.array(rho_raw[short], dtype=float)
+        #         elif bl in rho_raw:
+        #             self._rho_target[bl] = np.array(rho_raw[bl], dtype=float)
+        #         else:
+        #             raise KeyError(f"target missing block '{bl}' (or '{short}')")
+        #     for bl, mat in self._rho_target.items():
+        #         tr = np.trace(mat).real
+        #         eigs = np.linalg.eigvalsh(mat)
+        #         mpi.report(f"    target {bl}: trace={tr:.4f}, eigs=[{
+        #             ', '.join(f'{v:.3f}' for v in sorted(eigs))}]")
 
-        # ── Pre-solve: self-consistent HF, then shift Sigma_HF for next iter ──
-        if self._pre_solve and it <= self._pre_solve_n_iter:
-            # ── Pre-solve mode: self-consistent HF with injected Sigma as initial guess ──
-            self._in_tde_mode = False
-            mpi.report(f'\n  TDE SOLVER: pre-solve HF iteration {it}/{self._pre_solve_n_iter}')
-            self.triqs_solver.G0_iw << self.G0_freq
+        # # ── Pre-solve: self-consistent HF, then shift Sigma_HF for next iter ──
+        # if self._pre_solve and it <= self._pre_solve_n_iter:
+        #     # ── Pre-solve mode: self-consistent HF with injected Sigma as initial guess ──
+        #     self._in_tde_mode = False
+        #     mpi.report(f'\n  TDE SOLVER: pre-solve HF iteration {it}/{self._pre_solve_n_iter}')
+        #     self.triqs_solver.G0_iw << self.G0_freq
 
-            # Run FULL self-consistent HF (solver starts with Sigma_HF from previous iter)
-            # if it == 1:
-            self.triqs_solver.solve(h_int=self.h_int, **self.triqs_solver_params)
-            # if it > 1:
-                # self.triqs_solver.solve(h_int=self.h_int, one_shot=True)
+        #     # Run FULL self-consistent HF (solver starts with Sigma_HF from previous iter)
+        #     # if it == 1:
+        #     self.triqs_solver.solve(h_int=self.h_int, **self.triqs_solver_params)
+        #     # if it > 1:
+        #         # self.triqs_solver.solve(h_int=self.h_int, one_shot=True)
 
-            self._postprocess_hf()
+        #     self._postprocess_hf()
 
-            # Compute density difference and shift Sigma_HF for the NEXT iteration
-            alpha = self._pre_solve_targeting_alpha
-            mpi.report('  [pre_solve] diagnostics:')
-            shift = {}
-            for bl in self.triqs_solver.gf_struct:
-                bl_name = bl[0]
-                rho_cur = self.triqs_solver.G_iw[bl_name].density().real
-                rho_tgt = self._rho_target[bl_name]
-                delta_rho = rho_cur - rho_tgt
-                alpha = 10.0
-                shift[bl] = alpha * delta_rho
-                self.triqs_solver.Sigma_HF[bl_name] += shift[bl]
+        #     # Compute density difference and shift Sigma_HF for the NEXT iteration
+        #     alpha = self._pre_solve_targeting_alpha
+        #     mpi.report('  [pre_solve] diagnostics:')
+        #     shift = {}
+        #     for bl in self.triqs_solver.gf_struct:
+        #         bl_name = bl[0]
+        #         rho_cur = self.triqs_solver.G_iw[bl_name].density().real
+        #         rho_tgt = self._rho_target[bl_name]
+        #         delta_rho = rho_cur - rho_tgt
+        #         alpha = 10.0
+        #         shift[bl] = alpha * delta_rho
+        #         self.triqs_solver.Sigma_HF[bl_name] += shift[bl]
 
-                with np.printoptions(suppress=True, precision=4):
-                    mpi.report(f"    [{bl_name}] target   =\n {rho_tgt}")                                                                               
-                    mpi.report(f"    [{bl_name}] current  =\n {rho_cur}")                                                                               
-                    mpi.report(f"    [{bl_name}] delta_n  =\n {delta_rho}")                                                                             
-                    mpi.report(f"    [{bl_name}] shift    =\n {shift[bl]}")                                                                                 
+        #         with np.printoptions(suppress=True, precision=4):
+        #             mpi.report(f"    [{bl_name}] target   =\n {rho_tgt}")                                                                               
+        #             mpi.report(f"    [{bl_name}] current  =\n {rho_cur}")                                                                               
+        #             mpi.report(f"    [{bl_name}] delta_n  =\n {delta_rho}")                                                                             
+        #             mpi.report(f"    [{bl_name}] shift    =\n {shift[bl]}")                                                                                 
             
-            # second iteration applying the shift
-            self.triqs_solver.solve(h_int=self.h_int, one_shot=True)
-            # add shift to sigma_HF
+        #     # second iteration applying the shift
+        #     self.triqs_solver.solve(h_int=self.h_int, one_shot=True)
+        #     # add shift to sigma_HF
 
-            for bl in self.triqs_solver.gf_struct:
-                bl_name = bl[0]
-                self.triqs_solver.Sigma_HF[bl_name] += shift[bl]
+        #     for bl in self.triqs_solver.gf_struct:
+        #         bl_name = bl[0]
+        #         self.triqs_solver.Sigma_HF[bl_name] += shift[bl]
 
-            self._postprocess_hf()
+        #     self._postprocess_hf()
 
 
-        elif it <= self.n_warmup_hf and not self._warmup_done:
+        if it <= self.n_warmup_hf and not self._warmup_done:
             # ── HF warmup phase ──
             self._in_tde_mode = False
             mpi.report(f'\n  TDE SOLVER: HF warmup iteration {it}/{self.n_warmup_hf}')
@@ -583,54 +582,54 @@ class TDEInterface(AbstractDMFTSolver):
         return regret_fn
 
 
-    def embedding_callback(self, sigma_static):
-        """
-        Some of the states which are self consistent solutions of the impurity problem
-        are not stable wrt the embedding in the lattice. So basically this means
-        that some sigmas which are stable saddle points of the impurity will give 
-        a different density matrix when thrown back into the lattice.
+    # def embedding_callback(self, sigma_static):
+    #     """
+    #     Some of the states which are self consistent solutions of the impurity problem
+    #     are not stable wrt the embedding in the lattice. So basically this means
+    #     that some sigmas which are stable saddle points of the impurity will give 
+    #     a different density matrix when thrown back into the lattice.
 
-        The callback takes a Sigma and the correlated shell index and returns
-        a density matrix for that atom.
-        """
+    #     The callback takes a Sigma and the correlated shell index and returns
+    #     a density matrix for that atom.
+    #     """
 
-        Sigma_impurity = self.Sigma_freq.copy()
-        Sigma_list_sum_k = self.sum_k.Sigma_imp.copy()
+    #     Sigma_impurity = self.Sigma_freq.copy()
+    #     Sigma_list_sum_k = self.sum_k.Sigma_imp.copy()
 
-        for bl, gf in  Sigma_impurity:
-            Sigma_impurity[bl] << sigma_static[bl]
+    #     for bl, gf in  Sigma_impurity:
+    #         Sigma_impurity[bl] << sigma_static[bl]
 
-        Sigma_list_sum_k[self.icrsh] = Sigma_impurity
+    #     Sigma_list_sum_k[self.icrsh] = Sigma_impurity
         
-        # we need to compute the new density matrix with the new Sigma and the sum_k
+    #     # we need to compute the new density matrix with the new Sigma and the sum_k
 
-        self.sum_k.put_Sigma(Sigma_list_sum_k)
+    #     self.sum_k.put_Sigma(Sigma_list_sum_k)
 
 
-        # print("Chemical potential: ", self.sum_k.chemical_potential, flush=True)
-        # print("DC in embedding callback: ", self.sum_k.dc_imp, flush=True)
-        # # print("Sigma in embedding callback:\n ", self.sum_k.Sigma_imp[0][0].data[0], flush=True)
-        # print("Sigma in embedding callback:\n ", self.sum_k.Sigma_imp[0]['up'].data[0], flush=True)
-        # print("Sigma in embedding callback:\n ", self.sum_k, flush=True)
+    #     # print("Chemical potential: ", self.sum_k.chemical_potential, flush=True)
+    #     # print("DC in embedding callback: ", self.sum_k.dc_imp, flush=True)
+    #     # # print("Sigma in embedding callback:\n ", self.sum_k.Sigma_imp[0][0].data[0], flush=True)
+    #     # print("Sigma in embedding callback:\n ", self.sum_k.Sigma_imp[0]['up'].data[0], flush=True)
+    #     # print("Sigma in embedding callback:\n ", self.sum_k, flush=True)
 
-        self.sum_k.add_dc()
+    #     self.sum_k.add_dc()
 
-        # print("Sigma after adding DC: \n", self.sum_k.Sigma_imp[0]['up'].data[0], flush=True)
+    #     # print("Sigma after adding DC: \n", self.sum_k.Sigma_imp[0]['up'].data[0], flush=True)
 
-        dft_mu = self.sum_k.calc_mu( precision=self._mu_precision, method=self._mu_method, broadening=0.0001)
-        self.sum_k.chemical_potential = dft_mu
+    #     dft_mu = self.sum_k.calc_mu( precision=self._mu_precision, method=self._mu_method, broadening=0.0001)
+    #     self.sum_k.chemical_potential = dft_mu
 
-        Gloc_new = self.sum_k.extract_G_loc(mu=self.sum_k.chemical_potential)
+    #     Gloc_new = self.sum_k.extract_G_loc(mu=self.sum_k.chemical_potential)
 
-        # print("AAAAAAAAAAAAA", flush=True)
+    #     # print("AAAAAAAAAAAAA", flush=True)
 
-        dens_mat_new = Gloc_new[self.icrsh].density()
+    #     dens_mat_new = Gloc_new[self.icrsh].density()
 
-        total_dens_new = Gloc_new[self.icrsh].total_density().real
+    #     total_dens_new = Gloc_new[self.icrsh].total_density().real
 
-        Gimp_new = Gloc_new[self.icrsh]
+    #     Gimp_new = Gloc_new[self.icrsh]
 
-        return total_dens_new, dens_mat_new, Gimp_new
+    #     return total_dens_new, dens_mat_new, Gimp_new
 
 
 
