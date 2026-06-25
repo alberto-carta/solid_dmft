@@ -255,6 +255,11 @@ class TDEInterface(AbstractDMFTSolver):
         self._in_tde_mode = False  # set True when current solve is TDE
         self._prior_solutions = None
 
+        # ── Two-point correlator nn(τ) ──
+        self._measure_nn_tau = self.solver_params.get('measure_nn_tau', False)
+        self._n_tau_bosonic = self.solver_params.get('n_tau_bosonic', 10001)
+        self.nn_tau = None  # populated after TDE solve if measure_nn_tau is True
+
         # # ── Pre-solve targeting config ──
         # self._pre_solve = self.solver_params.get('pre_solve', False)
         # self._pre_solve_n_iter = self.solver_params.get('pre_solve_n_iter', 1)
@@ -502,6 +507,26 @@ class TDEInterface(AbstractDMFTSolver):
 
             self._postprocess_tde()
 
+            # ── Two-point correlator <n(τ)n(0)> ──
+            if self._measure_nn_tau and self.tde_solver.solutions is not None:
+                mpi.report(
+                    '\n  TDE SOLVER: Computing <n(τ)n(0)> two-point '
+                    'density-density correlator...'
+                )
+                from triqs_tde.nn_tau import compute_nn_tau
+
+                self.nn_tau = compute_nn_tau(
+                    solutions=self.tde_solver.solutions,
+                    gf_struct=self.sum_k.gf_struct_solver_list[self.icrsh],
+                    beta=self.general_params['beta'],
+                    n_tau_bosonic=self._n_tau_bosonic,
+                    weight_threshold=1e-4,
+                    orbital_symmetry_groups=self.tde_solver.orbital_symmetry_groups,
+                )
+                mpi.report(
+                    '  TDE SOLVER: <n(τ)n(0)> computation complete.'
+                )
+
             # Save landscape if enabled
             if self.solver_params['save_landscapes']:
                 _save_landscape(
@@ -667,7 +692,7 @@ class TDEInterface(AbstractDMFTSolver):
         # Compute interaction energy as weighted average over saddle points
         if mpi.is_master_node() and self.tde_solver.solutions is not None:
             self.interaction_energy = sum(
-                s.weight * s.potential_int for s in self.tde_solver.solutions
+                s.weight * (-s.potential_int) for s in self.tde_solver.solutions
             )
         else:
             self.interaction_energy = 0.0

@@ -103,6 +103,10 @@ def _compile_information(sum_k, general_params, solver_params, solvers, map_imp_
         if solver_type_per_imp[icrsh] == 'hartree':
             write_to_h5['Sigma_Refreq_{}'.format(icrsh)] = solvers[icrsh].Sigma_Refreq
 
+        if solver_type_per_imp[icrsh] == 'tde':
+            if solver_params[isolvsec].get('measure_nn_tau', False):
+                write_to_h5['O_NN_{}'.format(icrsh)] = solvers[icrsh].nn_tau
+
         if solver_type_per_imp[icrsh] == 'ctseg':
             # if legendre was set, that we have both now!
             write_to_h5['orbital_occupations_{}'.format(icrsh)] = solvers[icrsh].orbital_occupations

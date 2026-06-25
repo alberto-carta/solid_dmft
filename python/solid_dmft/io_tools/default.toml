@@ -208,6 +208,8 @@ custom_proposals_file = "<none>"
 save_landscapes = true
 verbosity = "normal"
 regret_dc = false
+measure_nn_tau = false
+n_tau_bosonic = 10001
 
 [dft]
 dft_code = "<none>"
